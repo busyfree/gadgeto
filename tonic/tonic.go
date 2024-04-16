@@ -98,15 +98,20 @@ func DefaultBindingHookMaxBodyBytes(maxBodyBytes int64) BindHook {
 		if c.Request.ContentLength == 0 || c.Request.Method == http.MethodGet {
 			return nil
 		}
-		switch c.Request.Header.Get("Content-Type") {
-		case "text/x-yaml", "text/yaml", "text/yml", "application/x-yaml", "application/x-yml", "application/yaml", "application/yml":
-			if err := c.ShouldBindWith(i, yamlBinding{}); err != nil && err != io.EOF {
-				return fmt.Errorf("error parsing request body: %s", err.Error())
-			}
-		default:
-			if err := c.ShouldBindWith(i, binding.JSON); err != nil && err != io.EOF {
-				return fmt.Errorf("error parsing request body: %s", err.Error())
-			}
+
+		ct := c.Request.Header["Content-Type"]
+		var b binding.Binding = binding.JSON
+
+		if len(ct) == 1 && ct[0] == binding.MIMEPOSTForm {
+			b = binding.Form
+		} else if len(ct) == 1 && ct[0] == binding.MIMEMultipartPOSTForm {
+			b = binding.FormMultipart
+		} else if len(ct) == 1 && ct[0] == binding.MIMEXML {
+			b = binding.XML
+		}
+
+		if err := c.ShouldBindWith(i, b); err != nil && err != io.EOF {
+			return fmt.Errorf("error parsing request body: %s", err.Error())
 		}
 		return nil
 	}
@@ -148,7 +153,7 @@ func GetRoutes() map[string]*Route {
 // MediaType returns the current media type (MIME)
 // used by the actual render hook.
 func MediaType() string {
-	return defaultMediaType
+	return mediaType
 }
 
 // GetErrorHook returns the current error hook.
@@ -239,6 +244,7 @@ func Tags(tags []string) func(*Route) {
 // to bind parameters, to differentiate from errors returned
 // by the handlers.
 type BindError struct {
+	bindHookErr   error
 	validationErr error
 	message       string
 	typ           reflect.Type
@@ -265,6 +271,11 @@ func (be BindError) ValidationErrors() validator.ValidationErrors {
 		return t
 	}
 	return nil
+}
+
+// BindHookError returns the error from the bind process.
+func (be BindError) BindHookError() error {
+	return be.bindHookErr
 }
 
 // An extractorFunc extracts data from a gin context according to
